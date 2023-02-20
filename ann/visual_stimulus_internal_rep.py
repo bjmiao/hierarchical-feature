@@ -203,6 +203,54 @@ def main_for_resnet() -> None:
         print(f_arr.shape)
         np.save(f"../internal_feature/resnet/block1_1/{name}.npy", f_arr)
 
+class FeatureConcatHelper(object):
+    def __init__(self):
+        self.all_features = {}
+    def store(self, feat, name, on_gpu=True):
+        if not name in self.all_features.keys():
+            self.all_features[name] = []
+        if on_gpu:
+            self.all_features[name].append(feat.to("cpu").detach().numpy())
+        else:
+            self.all_features[name].append(feat)
+    
+    def dump(self, path):
+        os.makedirs(path, exist_ok=True)
+
+        for key, feature_list in self.all_features.items():
+            feature_filename = "features_{key}.npy"
+            feat_all = np.concatenate(feature_list, axis=0)
+            print(key, feat_all.shape)
+            np.save(os.path.join(path, feature_filename), feat_all)
+
+def main_for_vonenet() -> None:
+    model = vonenet.VOneNet(model_arch="resnet50")
+    print(model)
+
+    model = model.to(config.device)
+    test_prefecther = load_dataset()
+
+    test_prefecther.reset()
+    batch_data = test_prefecther.next()
+
+    fch = FeatureConcatHelper()
+    while batch_data is not None:
+        images = batch_data["image"].to(device=config.device, memory_format=torch.channels_last, non_blocking=True)
+        target = batch_data["target"].to(device=config.device, non_blocking=True)
+        print("image shape", images.shape)
+        x = images
+        x = model.vone_block(x)
+        fch.store(x, "vone_block")
+        x = model.bottleneck(x)
+        fch.store(x, "bottleneck")
+        x = model.model(x)
+        fch.store(x, "model")
+
+        batch_data = test_prefecther.next()
+
+    fch.dump("../internal_feature/vonenet_resnet50/block1_1/")
+
+
 def main_for_CORNet(ngpus = 0, model = None, times = 5) -> None:
     """
     From CORNet/run.py
@@ -324,58 +372,6 @@ def main_for_CORNet(ngpus = 0, model = None, times = 5) -> None:
             fname = f'CORnet-{model}_{layer}_{sublayer}_{time_step}_feats.npy'
             np.save(os.path.join(output_path, fname), feat)
 
-class FeatureConcatHelper(object):
-    def __init__(self):
-        self.all_features = {}
-    def store(self, feat, name, on_gpu=True):
-        if not name in self.all_features.keys():
-            self.all_features[name] = []
-        if on_gpu:
-            self.all_features[name].append(feat.to("cpu").detach().numpy())
-        else:
-            self.all_features[name].append(feat)
-    
-    def dump(self, path):
-        os.makedirs(path, exist_ok=True)
-
-        for key, feature_list in self.all_features.items():
-            feature_filename = "features_{key}"
-            feat_all = np.concatenate(feature_list, axis=0)
-            print(key, feat_all.shape)
-            np.save(os.path.join(path, f'{key}.npy'), feat_all)
-
-def main_for_vonenet() -> None:
-    model = vonenet.VOneNet(model_arch="resnet50")
-    print(model)
-
-    model = model.to(config.device)
-    test_prefecther = load_dataset()
-    features_images_all = []
-    features_result_layer0_all = []
-    features_result_layer1_all = []
-    features_result_layer2_all = []
-    features_result_layer3_all = []
-    features_result_layer4_all = []
-
-    test_prefecther.reset()
-    batch_data = test_prefecther.next()
-
-    fch = FeatureConcatHelper()
-    while batch_data is not None:
-        images = batch_data["image"].to(device=config.device, memory_format=torch.channels_last, non_blocking=True)
-        target = batch_data["target"].to(device=config.device, non_blocking=True)
-        print("image shape", images.shape)
-        x = images
-        x = model.vone_block(x)
-        fch.store(x, "vone_block")
-        x = model.bottleneck(x)
-        fch.store(x, "bottleneck")
-        x = model.model(x)
-        fch.store(x, "model")
-
-        batch_data = test_prefecther.next()
-
-    fch.dump("../internal_feature/vonenet_resnet50/block1_1/")
 if __name__ == "__main__":
     # main_for_alexnet()
     # main_for_vgg()
