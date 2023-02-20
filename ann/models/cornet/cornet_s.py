@@ -176,7 +176,7 @@ class V1Block(nn.Module):
         all_features['norm2'] = x.to("cpu").detach().numpy()
         x = self.nonlin2(x)
         all_features['nonlin2'] = x.to("cpu").detach().numpy()
-        output = self.output
+        output = self.output(x)
         all_features['output'] = x.to("cpu").detach().numpy()
         return output, all_features
 
