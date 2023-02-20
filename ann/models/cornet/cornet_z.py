@@ -42,6 +42,17 @@ class CORblock_Z(nn.Module):
         x = self.output(x)  # for an easy access to this block's output
         return x
 
+    def forward_and_extract(self, inp):
+        all_features = {}
+        x = self.conv(inp)
+        all_features['conv'] = x.to("cpu").detach().numpy()
+        x = self.nonlin(x)
+        all_features['nonlin'] = x.to("cpu").detach().numpy()
+        x = self.pool(x)
+        all_features['pool'] = x.to("cpu").detach().numpy()
+        x = self.output(x)  # for an easy access to this block's output
+        all_features['output'] = x.to("cpu").detach().numpy()
+        return x, all_features
 
 def CORnet_Z():
     model = nn.Sequential(OrderedDict([

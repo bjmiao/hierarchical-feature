@@ -69,6 +69,34 @@ class CORblock_R(nn.Module):
         output = state
         return output, state
 
+    def forward_and_extract(self, inp = None, state = None, batch_size = None):
+        all_features = {}
+        if inp is None:  # at t=0, there is no input yet except to V1
+            inp = torch.zeros([batch_size, self.out_channels, self.out_shape, self.out_shape])
+            if self.conv_input.weight.is_cuda:
+                inp = inp.cuda()
+        else:
+            inp = self.conv_input(inp)
+            inp = self.norm_input(inp)
+            inp = self.nonlin_input(inp)
+        all_features['inp'] = inp.to("cpu").detach().numpy()
+        if state is None:  # at t=0, state is initialized to 0
+            state = 0
+        skip = inp + state
+        all_features['skip'] = skip.to("cpu").detach().numpy()
+
+        x = self.conv1(skip)
+        all_features['conv1'] = x.to("cpu").detach().numpy()
+        x = self.norm1(x)
+        all_features['norm1'] = x.to("cpu").detach().numpy()
+        x = self.nonlin1(x)
+        all_features['nonlin1'] = x.to("cpu").detach().numpy()
+
+        state = self.output(x)
+        output = state
+        all_features['output'] = state.to("cpu").detach().numpy()
+        return output, state, all_features
+
 
 class CORnet_R(nn.Module):
 
@@ -111,3 +139,35 @@ class CORnet_R(nn.Module):
 
         out = self.decoder(outputs['IT'])
         return out
+    
+    def forward_and_extract(self, inp):
+        outputs = {'inp': inp}
+        states = {}
+        blocks = ['inp', 'V1', 'V2', 'V4', 'IT']
+        features_in_total = {}
+        for block in blocks[1:]:
+            if block == 'V1':  # at t=0 input to V1 is the image
+                inp = outputs['inp']
+            else:  # at t=0 there is no input yet to V2 and up
+                inp = None
+            # new_output, new_state, features = getattr(self, block)(inp, batch_size=outputs['inp'].shape[0])
+            new_output, new_state, features = getattr(self, block).forward_and_extract(inp, batch_size=outputs['inp'].shape[0])
+            for key, feat in features.items():
+                features_in_total[f"{block}_0_{key}"] = feat
+            outputs[block] = new_output
+            states[block] = new_state
+
+        for t in range(1, self.times):
+            for block in blocks[1:]:
+                prev_block = blocks[blocks.index(block) - 1]
+                prev_output = outputs[prev_block]
+                prev_state = states[block]
+                # new_output, new_state = getattr(self, block)(prev_output, prev_state)
+                new_output, new_state, features = getattr(self, block).forward_and_extract(prev_output, prev_state)
+                for key, feat in features.items():
+                    features_in_total[f"{block}_{t}_{key}"] = feat
+                outputs[block] = new_output
+                states[block] = new_state
+
+        out = self.decoder(outputs['IT'])
+        return out, features_in_total

@@ -218,7 +218,7 @@ class FeatureConcatHelper(object):
         os.makedirs(path, exist_ok=True)
 
         for key, feature_list in self.all_features.items():
-            feature_filename = "features_{key}.npy"
+            feature_filename = f"features_{key}.npy"
             feat_all = np.concatenate(feature_list, axis=0)
             print(key, feat_all.shape)
             np.save(os.path.join(path, feature_filename), feat_all)
@@ -228,8 +228,8 @@ def main_for_vonenet() -> None:
     print(model)
 
     model = model.to(config.device)
-    test_prefecther = load_dataset()
 
+    test_prefecther = load_dataset()
     test_prefecther.reset()
     batch_data = test_prefecther.next()
 
@@ -251,18 +251,18 @@ def main_for_vonenet() -> None:
     fch.dump("../internal_feature/vonenet_resnet50/block1_1/")
 
 
-def main_for_CORNet(ngpus = 0, model = None, times = 5) -> None:
+def main_for_CORNet(ngpus = 0, model_type = None, times = 5) -> None:
     """
     From CORNet/run.py
     - ngpus :
-    - model: (r, rt, s, z, None)
+    - model_type: (r, rt, s, z, None)
     - time: number of time steps to run the model (only R model)
     """
-    def get_model(pretrained=False):
+    def get_cornet(model_type, times = 0, pretrained=False):
         map_location = None if ngpus > 0 else 'cpu'
-        model = getattr(cornet, f'cornet_{model.lower()}')
-        if model.lower() == 'r':
-            model = model(pretrained=pretrained, map_location=map_location, times=FLAGS.times)
+        model = getattr(cornet, f'cornet_{model_type.lower()}')
+        if model_type.lower() == 'r':
+            model = model(pretrained=pretrained, map_location=map_location, times=times)
         else:
             model = model(pretrained=pretrained, map_location=map_location)
 
@@ -272,111 +272,76 @@ def main_for_CORNet(ngpus = 0, model = None, times = 5) -> None:
             model = model.cuda()
         return model
 
-    """
-    Suitable for small image sets. If you have thousands of images or it is
-    taking too long to extract features, consider using
-    `torchvision.datasets.ImageFolder`, using `ImageNetVal` as an example.
+    model = get_cornet(model_type = model_type, times = times, pretrained=True)
 
-    Kwargs:
-        - layers (choose from: V1, V2, V4, IT, decoder)
-        - sublayer (e.g., output, conv1, avgpool)
-        - time_step (which time step to use for storing features)
-        - imsize (resize image to how many pixels, default: 224)
-    """
-    layer = 'decoder'
-    sublayer = 'avgpool'
-    time_step = 0
-    imsize = 224
-    model = get_model(pretrained=True)
-    normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                             std=[0.229, 0.224, 0.225])
-    transform = torchvision.transforms.Compose([
-                    torchvision.transforms.Resize((imsize, imsize)),
-                    torchvision.transforms.ToTensor(),
-                    normalize,
-                ])
     model.eval()
-    _model_feats_all = {}
-
-    def _store_to_which(layer, sublayer):
-        _model_feats_all[layer, sublayer] = []
-        _model_feats = _model_feats_all[layer, sublayer]
-        def _store_feats(layer, inp, output):
-            """An ugly but effective way of accessing intermediate model features
-            """
-            output = output.cpu().numpy()
-            # print("Here!", layer, output.shape, len(_model_feats))
-            _model_feats.append(np.reshape(output, (len(output), -1)))
-        return _store_feats
 
     try:
         m = model.module
     except:
         m = model
 
-    model_feats_all = {}
-    for layer in ['V1', 'V2', 'V4', 'IT']:
-        for sublayer in ['output']:
-            model_layer = getattr(getattr(m, layer), sublayer)
-            model_layer.register_forward_hook(_store_to_which(layer, sublayer))
+    model = model.to(device=config.device)
 
-    model_feats = []
-    with torch.no_grad():
-        model_feats = []
-        data_path = "/home/bjmiao/Documents/alexnet/data/block1_1/"
-        fnames = sorted(glob.glob(os.path.join(data_path, '*.*')))
-        if len(fnames) == 0:
-            raise FileNotFoundError(f'No files found in {data_path}')
-        # ims = []
-        # for fname in fnames:
-        #     try:
-        #         im = Image.open(fname).convert('RGB')
-        #     except:
-        #         raise FileNotFoundError(f'Unable to load {fname}')
-        #     im = transform(im)
-        #     im = im.unsqueeze(0)  # adding extra dimension for batch size of 1
-        #     ims.append(im)
-        # ims = np.concatenate(ims, axis = 0)
-        # print(ims.shape)
+    test_prefecther = load_dataset()
+    test_prefecther.reset()
+    batch_data = test_prefecther.next()
 
-        # _model_feats = []
-        # model(ims)
-        # model_feats.append(_model_feats[time_step])
-        for layer in ['V1', 'V2', 'V4', 'IT']:
-            for sublayer in ['output']:
-                for t in range(5):
-                    model_feats_all[layer, sublayer, t] = []
+    fch = FeatureConcatHelper()
+    while batch_data is not None:
+        images = batch_data["image"].to(device=config.device, memory_format=torch.channels_last, non_blocking=True)
+        target = batch_data["target"].to(device=config.device, non_blocking=True)
 
-        for fname in tqdm.tqdm(fnames):
-            try:
-                im = Image.open(fname).convert('RGB')
-            except:
-                raise FileNotFoundError(f'Unable to load {fname}')
-            for layer in ['V1', 'V2', 'V4', 'IT']:
-                for sublayer in ['output']:
-                    _model_feats_all[layer, sublayer].clear()
-            im = transform(im)
-            im = im.unsqueeze(0)  # adding extra dimension for batch size of 1
-            model(im)
-            for (layer, sublayer), feat in _model_feats_all.items():
-                for time_step in range(len(feat)):
-                    model_feats_all[layer, sublayer, time_step].append(_model_feats_all[layer, sublayer][time_step])
-            # model_feats.append(_model_feats[time_step])
+        x = images
+        
+        if 'r' in model_type:
+            x, featall = model.forward_and_extract(x)
+            for key, feat in featall.items():
+                # print(key, feat.shape)
+                fch.store(feat, key, on_gpu=False)
+        else:
+            x, v1_internal = model.V1.forward_and_extract(x)
+            # print(v1_internal['conv'])
+            for key, feat in v1_internal.items():
+                fch.store(feat, f"v1_{key}", on_gpu=False)
+            del v1_internal
+            print("V1", x.shape)
 
-        # model_feats = np.concatenate(model_feats)
-    output_path = "../internal_feature/CORNet/block1_1/"
-    if output_path is not None:
-        for (layer, sublayer, time_step), feat in model_feats_all.items():
-            feat = np.concatenate(feat)
-            print(type(feat), feat.shape)
-            fname = f'CORnet-{model}_{layer}_{sublayer}_{time_step}_feats.npy'
-            np.save(os.path.join(output_path, fname), feat)
+            x, v2_internal = model.V2.forward_and_extract(x)            
+            for key, feat in v2_internal.items():
+                fch.store(feat, f"v2_{key}", on_gpu=False)
+            del v2_internal
+            print("V2", x.shape)
+
+            x, v4_internal = model.V4.forward_and_extract(x)            
+            for key, feat in v4_internal.items():
+                fch.store(feat, f"v4_{key}", on_gpu=False)
+            del v4_internal
+            print("V4", x.shape)
+
+            x, it_internal = model.IT.forward_and_extract(x)
+            for key, feat in it_internal.items():
+                fch.store(feat, f"it_{key}", on_gpu=False)
+            del it_internal
+            print("IT", x.shape)
+
+            output = model.decoder(x)
+
+            # output_ref = model(images)
+            # assert(torch.equal(output_ref, output))
+
+        batch_data = test_prefecther.next()
+
+    fch.dump(f"../internal_feature/CORNet_{model_type}/block1_1/")
+
 
 if __name__ == "__main__":
     # main_for_alexnet()
     # main_for_vgg()
     # main_for_resnet()
-    # main_for_CORNet(model='s')
-    # main_for_CORNet(model='r')
-    main_for_vonenet()
+    # main_for_CORNet(model_type='s')
+    # main_for_CORNet(model_type='z')
+    # main_for_CORNet(model_type='r')
+    main_for_CORNet(model_type='rt')
+    # main_for_vonenet()
 

@@ -88,21 +88,115 @@ class CORblock_S(nn.Module):
 
         return output
 
+    def forward_and_extract(self, inp):
+        all_features = {}
+        x = self.conv_input(inp)
+        all_features["convinput"] = x.to("cpu").detach().numpy()
 
+        for t in range(self.times):
+            if t == 0:
+                skip = self.norm_skip(self.skip(x))
+                # all_features[f"skip_{t}"] = x.to("cpu").detach().numpy()
+                self.conv2.stride = (2, 2)
+                all_features[f"stride_{t}"] = x.to("cpu").detach().numpy()
+
+            else:
+                skip = x
+                # all_features[f"skip_{t}"] = x.to("cpu").detach().numpy()
+                self.conv2.stride = (1, 1)
+                all_features[f"stride_{t}"] = x.to("cpu").detach().numpy()
+
+            x = self.conv1(x)
+            all_features[f"conv1_{t}"] = x.to("cpu").detach().numpy()
+            x = getattr(self, f'norm1_{t}')(x)
+            all_features[f"norm1_{t}"] = x.to("cpu").detach().numpy()
+            x = self.nonlin1(x)
+            all_features[f"nonlin1_{t}"] = x.to("cpu").detach().numpy()
+
+            x = self.conv2(x)
+            all_features[f"conv2_{t}"] = x.to("cpu").detach().numpy()
+            x = getattr(self, f'norm2_{t}')(x)
+            all_features[f"norm2_{t}"] = x.to("cpu").detach().numpy()
+            x = self.nonlin2(x)
+            all_features[f"nonlin2_{t}"] = x.to("cpu").detach().numpy()
+
+            x = self.conv3(x)
+            all_features[f"conv3_{t}"] = x.to("cpu").detach().numpy()
+            x = getattr(self, f'norm3_{t}')(x)
+            all_features[f"norm3_{t}"] = x.to("cpu").detach().numpy()
+
+            x += skip
+            all_features[f"skip_{t}"] = x.to("cpu").detach().numpy()
+            x = self.nonlin3(x)
+            all_features[f"nonlin3_{t}"] = x.to("cpu").detach().numpy()
+            output = self.output(x)
+        all_features[f"output"] = output.to("cpu").detach().numpy()
+
+        return output, all_features
+
+class V1Block(nn.Module):
+    # further custom this so that we need
+    def __init__(self):
+        super().__init__()
+
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.norm1 = nn.BatchNorm2d(64)
+        self.nonlin1 = nn.ReLU(inplace=True)
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.norm2 = nn.BatchNorm2d(64)
+        self.nonlin2 = nn.ReLU(inplace=True)
+        self.output = Identity()
+    
+    def forward(self, inp):
+        x = self.conv1(inp)
+        x = self.norm1(x)
+        x = self.nonlin1(x)
+        x = self.pool(x)
+        x = self.conv2(x)
+        x = self.norm2(x)
+        x = self.nonlin2(x)
+        output = self.output(x)
+        return output
+
+    def forward_and_extract(self, inp):
+        all_features = {}
+        x = inp
+        x = self.conv1(inp)
+        all_features['conv1'] = x.to("cpu").detach().numpy()
+        x = self.norm1(x)
+        all_features['norm1'] = x.to("cpu").detach().numpy()
+        x = self.nonlin1(x)
+        all_features['nonlin1'] = x.to("cpu").detach().numpy()
+        x = self.pool(x)
+        all_features['pool'] = x.to("cpu").detach().numpy()
+        x = self.conv2(x)
+        all_features['conv2'] = x.to("cpu").detach().numpy()
+        x = self.norm2(x)
+        all_features['norm2'] = x.to("cpu").detach().numpy()
+        x = self.nonlin2(x)
+        all_features['nonlin2'] = x.to("cpu").detach().numpy()
+        output = self.output
+        all_features['output'] = x.to("cpu").detach().numpy()
+        return output, all_features
+
+
+    
 def CORnet_S():
     model = nn.Sequential(OrderedDict([
-        ('V1', nn.Sequential(OrderedDict([  # this one is custom to save GPU memory
-            ('conv1', nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
-                            bias=False)),
-            ('norm1', nn.BatchNorm2d(64)),
-            ('nonlin1', nn.ReLU(inplace=True)),
-            ('pool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1)),
-            ('conv2', nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1,
-                            bias=False)),
-            ('norm2', nn.BatchNorm2d(64)),
-            ('nonlin2', nn.ReLU(inplace=True)),
-            ('output', Identity())
-        ]))),
+        # ('V1', nn.Sequential(OrderedDict([  # this one is custom to save GPU memory
+        #     ('conv1', nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+        #                     bias=False)),
+        #     ('norm1', nn.BatchNorm2d(64)),
+        #     ('nonlin1', nn.ReLU(inplace=True)),
+        #     ('pool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1)),
+        #     ('conv2', nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1,
+        #                     bias=False)),
+        #     ('norm2', nn.BatchNorm2d(64)),
+        #     ('nonlin2', nn.ReLU(inplace=True)),
+        #     ('output', Identity())
+        # ]))),
+        ('V1', V1Block()),
         ('V2', CORblock_S(64, 128, times=2)),
         ('V4', CORblock_S(128, 256, times=4)),
         ('IT', CORblock_S(256, 512, times=2)),
