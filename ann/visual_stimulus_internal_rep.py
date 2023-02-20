@@ -146,11 +146,11 @@ def main_for_resnet(depth=18) -> None:
     while batch_data is not None:
         images = batch_data["image"].to(device=config.device, memory_format=torch.channels_last, non_blocking=True)
         target = batch_data["target"].to(device=config.device, non_blocking=True)
-        print(images.shape)
+        print("New batch", images.shape)
         
         x, features = model.forward_and_extract(images)
         for key, feat in features.items():
-            print(key, feat.shape)
+            # print(key, feat.shape)
             fch.store(feat, key, on_gpu = False)
         
         x_ref = model(images)
@@ -158,7 +158,7 @@ def main_for_resnet(depth=18) -> None:
         # break
         batch_data = test_prefecther.next()
 
-    fch.dump(f"../internal_feature/resnet/block1_1/")
+    fch.dump(f"../internal_feature/{model_name}/block1_1/")
 
 def main_for_vonenet() -> None:
     model = vonenet.VOneNet(model_arch="resnet50")
