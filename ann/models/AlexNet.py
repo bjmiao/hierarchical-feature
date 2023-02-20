@@ -60,6 +60,19 @@ class AlexNet(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
 
+    def forward_and_extract(self, x: Tensor) -> Tensor:
+        all_features = {}
+        all_features['input'] = x.to("cpu").detach().numpy()
+        for idx_layer, layer in enumerate(self.features):
+            x = layer(x)
+            layer_name = layer.__class__.__name__.split('.')[-1] # layer_name = Conv2d/ReLU/MaxPool2d
+            all_features[f"{layer_name}_{idx_layer}"] = x.to("cpu").detach().numpy()
+        x = self.avgpool(x)
+        all_features["avgpool"] = x.to("cpu").detach().numpy()
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x, all_features
+
     # Support torch.script function
     def _forward_impl(self, x: Tensor) -> Tensor:
         out = self.features(x)

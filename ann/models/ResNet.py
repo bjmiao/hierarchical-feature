@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import math
 import sys
@@ -49,7 +50,31 @@ class BasicBlock(nn.Module):
         out = self.relu(out)
 
         return out
+    
+    def forward_and_extract(self, x):
+        all_features = OrderedDict()
 
+        if self.downsample is not None:
+            residual = self.downsample(x)
+        else:
+            residual = x
+
+        # out = self.group1(x)
+        idx = 0
+        layer_name = None
+        for layer in self.group1:
+            x = layer(x)
+            layer_name = layer.__class__.__name__.split('.')[-1] # layer_name = Conv2d/ReLU/MaxPool2d
+            all_features[(layer_name, idx)] = x.to("cpu").detach().numpy()
+            idx += 1
+        # out = out + residual
+        x = x + residual
+        all_features[(f"{layer_name}_afterRes", idx)] = x.to("cpu").detach().numpy()
+        idx += 1
+        # out = self.relu(out)
+        x = self.relu(x)
+        all_features[("relu",idx)] = x.to("cpu").detach().numpy()
+        return x, all_features
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -80,6 +105,30 @@ class Bottleneck(nn.Module):
 
         return out
 
+    def forward_and_extract(self, x):
+        all_features = OrderedDict()
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+        else:
+            residual = x
+
+        # out = self.group1(x)
+        idx = 0
+        layer_name = None
+        for layer in self.group1:
+            x = layer(x)
+            layer_name = layer.__class__.__name__.split('.')[-1] # layer_name = Conv2d/ReLU/MaxPool2d
+            all_features[(layer_name, idx)] = x.to("cpu").detach().numpy()
+            idx += 1
+        # out = out + residual
+        x = x + residual
+        all_features[(f"{layer_name}_afterRes", idx)] = x.to("cpu").detach().numpy()
+        idx += 1
+        # out = self.relu(out)
+        x = self.relu(x)
+        all_features[("relu",idx)] = x.to("cpu").detach().numpy()
+        return x, all_features
 
 class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes=1000):
@@ -141,9 +190,38 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.group2(x)
-
         return x
 
+    def forward_and_extract(self, x):
+        features_in_total = {}
+        idx_global = 0
+        
+        # x = self.group1(x)
+        for layer_blocks in [self.group1]:
+            for layer in layer_blocks:
+                x = layer(x)
+                layer_name = layer.__class__.__name__.split('.')[-1] # layer_name = Conv2d/ReLU/MaxPool2d
+                features_in_total[f"{layer_name}_{idx_global}"] = x.to("cpu").detach().numpy()
+                idx_global += 1
+
+        # forward_and_extract for layer1, layer2. layer3, layer4
+        for layer_blocks in [self.layer1, self.layer2, self.layer3, self.layer4]:
+            for block in layer_blocks:
+                x, features = block.forward_and_extract(x)
+                for (layer_name, idx), feat in features.items():
+                    features_in_total[f"{layer_name}_{idx_global}"] = feat
+                    idx_global += 1
+        # avgpool
+        x = self.avgpool(x)
+        features_in_total[f'avgpool_{idx_global}'] = x.to("cpu").detach().numpy()
+        idx_global += 1
+
+        # group2
+        x = torch.flatten(x, 1)
+        # x = x.view(x.size(0), -1)
+        x = self.group2(x)
+        features_in_total[f'output_{idx_global}'] = x.to("cpu").detach().numpy()
+        return x, features_in_total
 
 def resnet18(pretrained=False, model_root=None, **kwargs):
     model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)

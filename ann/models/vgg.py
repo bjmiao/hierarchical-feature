@@ -39,6 +39,20 @@ class VGG(nn.Module):
         x = self.classifier(x)
         return x
 
+    def forward_and_extract(self, x):
+        all_features = {}
+        all_features['input'] = x.to("cpu").detach().numpy()
+
+        for idx_layer, layer in enumerate(self.features):
+            x = layer(x)
+            layer_name = layer.__class__.__name__.split('.')[-1] # layer_name = Conv2d/ReLU/MaxPool2d
+            all_features[f'{layer_name}_{idx_layer}'] = x.to("cpu").detach().numpy()
+
+        x = x.view(x.size(0), -1)
+        x = self.classifier(x)
+
+        return x, all_features
+
     def _initialize_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
